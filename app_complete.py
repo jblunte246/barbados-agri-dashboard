@@ -219,8 +219,8 @@ def merge_all_data():
             axis=1
         )
         
-        # Fill any missing inflation values with forward fill
-        merged['inflation_rate'] = merged['inflation_rate'].fillna(method='ffill')
+        # FIXED: Use ffill() instead of fillna(method='ffill')
+        merged['inflation_rate'] = merged['inflation_rate'].ffill()
         
         return merged
         
