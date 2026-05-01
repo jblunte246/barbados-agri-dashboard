@@ -1,6 +1,6 @@
 # app_complete.py
 # Barbados Agri-Climate-Economy Intelligence Dashboard
-# Full working version with standardized Excel files
+# Full working version - Year column now formatted as Plain Text in Excel
 # Run with: streamlit run app_complete.py
 
 import streamlit as st
@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
-# Fix for numpy compatibility (for older environments)
+# Fix for numpy compatibility
 if not hasattr(np, 'float'):
     np.float = float
 
@@ -67,12 +67,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# DATA LOADING FUNCTIONS - MATCHING YOUR EXACT FILE STRUCTURE
+# DATA LOADING FUNCTIONS
 # ============================================================================
 
 @st.cache_data
 def load_climate_data():
-    """Load climate data - columns: year, month, average_temp_c, total_rainfall_mm, etc."""
+    """Load climate data"""
     df = pd.read_excel('Copy of climate data 2007_2022.xlsx', sheet_name='Sheet1')
     
     # Create month number for sorting
@@ -80,7 +80,7 @@ def load_climate_data():
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
     df['month_num'] = df['month'].map(month_map)
     
-    # Drop any rows with missing year (like the empty year rows in 2014)
+    # Drop rows with missing year
     df = df.dropna(subset=['year'])
     
     # Convert year to integer
@@ -90,7 +90,7 @@ def load_climate_data():
 
 @st.cache_data
 def load_inflation_data():
-    """Load inflation data - columns: year, month, moving_avg_inflation"""
+    """Load inflation data"""
     df = pd.read_excel('Copy of inflation_data_2007 to 2022 base_yr_july_2001.xlsx', sheet_name='Sheet1')
     
     # Create month number
@@ -102,7 +102,7 @@ def load_inflation_data():
     df = df[['year', 'month_num', 'moving_avg_inflation']]
     df = df.rename(columns={'moving_avg_inflation': 'inflation_rate'})
     
-    # Drop NA values (some months have N/A in your file)
+    # Drop NA values
     df = df.dropna()
     
     # Convert year to integer
@@ -112,7 +112,7 @@ def load_inflation_data():
 
 @st.cache_data
 def load_wholesale_data():
-    """Load wholesale data - columns: product, year, Jan, Feb, Mar... (one row per product-year)"""
+    """Load wholesale data - year column now formatted as Plain Text"""
     df_wide = pd.read_excel('Copy of Wholesale prices - 2007-2022.xlsx', sheet_name='Sheet1')
     
     # Reshape from wide to long format
@@ -129,6 +129,9 @@ def load_wholesale_data():
     # Rename columns
     df_long = df_long.rename(columns={'product': 'crop'})
     
+    # Convert year to integer (now safe because formatted as Plain Text)
+    df_long['year'] = df_long['year'].astype(int)
+    
     # Create month number
     month_map = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6,
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
@@ -138,14 +141,11 @@ def load_wholesale_data():
     # Drop rows with missing prices
     df_long = df_long.dropna(subset=['price_usd_per_kg'])
     
-    # Convert year to integer
-    df_long['year'] = df_long['year'].astype(int)
-    
     return df_long
 
 @st.cache_data
 def load_macro_data():
-    """Load macroeconomic data - columns: year, food_imp_per_gdp, tour_arrival, agri_per_gdp, etc."""
+    """Load macroeconomic data"""
     df = pd.read_excel('Copy of macro data_2007-2022.xlsx', sheet_name='Sheet1')
     
     # Rename columns for clarity
@@ -176,8 +176,8 @@ def merge_all_data():
         wholesale = load_wholesale_data()
         macro = load_macro_data()
         
-        # Debug info (will appear in logs)
-        print(f"Climate: {len(climate)} rows, years {climate['year'].min()}-{climate['year'].max()}")
+        # Debug info
+        print(f"Climate: {len(climate)} rows")
         print(f"Inflation: {len(inflation)} rows")
         print(f"Wholesale: {len(wholesale)} rows, {wholesale['crop'].nunique()} crops")
         print(f"Macro: {len(macro)} rows")
@@ -265,14 +265,12 @@ def main():
             st.error("""
             ❌ **Failed to load data. Please verify:**
             
-            1. All 4 Excel files are in the same directory as this script
-            2. File names match exactly (case-sensitive):
+            1. All 4 Excel files are in the same directory
+            2. File names match exactly:
                - `Copy of climate data 2007_2022.xlsx`
                - `Copy of inflation_data_2007 to 2022 base_yr_july_2001.xlsx`
                - `Copy of Wholesale prices - 2007-2022.xlsx`
                - `Copy of macro data_2007-2022.xlsx`
-            
-            3. All files have their first row as column headers
             """)
             return
         
@@ -382,27 +380,23 @@ def main():
     st.subheader("💰 Inflation vs. Wholesale Prices")
     
     if len(selected_crops) > 0 and len(filtered_df) > 0:
-        # Aggregate by year for cleaner view
+        # Aggregate by year
         yearly_prices = filtered_df.groupby(['year', 'crop'])['price_usd_per_kg'].mean().reset_index()
-        yearly_inflation = df[['year', 'inflation_rate']].drop_duplicates()
-        
-        yearly_prices = yearly_prices.merge(yearly_inflation, on='year', how='left')
         
         fig_inflation = px.line(
             yearly_prices,
             x='year',
             y='price_usd_per_kg',
             color='crop',
-            title="Crop Prices Over Time (with inflation context)",
+            title="Crop Prices Over Time",
             labels={'year': 'Year', 'price_usd_per_kg': 'Price (USD/kg)'},
             markers=True
         )
-        
-        # Add inflation as a secondary line annotation
         fig_inflation.update_layout(height=400)
         st.plotly_chart(fig_inflation, use_container_width=True)
         
         # Show inflation trend separately
+        yearly_inflation = df[['year', 'inflation_rate']].drop_duplicates().sort_values('year')
         fig_inflation_trend = px.line(
             yearly_inflation,
             x='year',
@@ -627,7 +621,8 @@ def main():
             <div class="insight-box-farmer">
                 <strong>📈 Price Change Guide:</strong>
                 <ul>
-                    <li>🟢 Green/Red scale: Green = Price DECREASE (good for buying), Red = Price INCREASE (good for selling)</li>
+                    <li>🟢 Green = Price DECREASE (good for buying)</li>
+                    <li>🔴 Red = Price INCREASE (good for selling)</li>
                     <li>July-August shows the strongest price increases across most crops</li>
                     <li>April-May shows the strongest price decreases (harvest season)</li>
                 </ul>
