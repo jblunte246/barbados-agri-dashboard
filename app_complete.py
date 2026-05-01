@@ -9,7 +9,6 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.linear_model import LinearRegression
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -68,12 +67,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# DATA LOADING FUNCTIONS - MATCHING YOUR STANDARDIZED FILE STRUCTURE
+# DATA LOADING FUNCTIONS - MATCHING YOUR EXACT FILE STRUCTURE
 # ============================================================================
 
 @st.cache_data
 def load_climate_data():
-    """Load climate data - columns: year, month, total_rainfall_mm, average_temp_c, etc."""
+    """Load climate data - columns: year, month, average_temp_c, total_rainfall_mm, etc."""
     df = pd.read_excel('Copy of climate data 2007_2022.xlsx', sheet_name='Sheet1')
     
     # Create month number for sorting
@@ -81,14 +80,11 @@ def load_climate_data():
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
     df['month_num'] = df['month'].map(month_map)
     
-    # Rename for consistency
-    df = df.rename(columns={
-        'total_rainfall_mm': 'rainfall_mm',
-        'average_temp_c': 'temp_avg_c',
-        'average_relative_humidity_percent': 'humidity_pct',
-        'total_rain_days': 'rain_days',
-        'storm_days': 'storm_days'
-    })
+    # Drop any rows with missing year (like the empty year rows in 2014)
+    df = df.dropna(subset=['year'])
+    
+    # Convert year to integer
+    df['year'] = df['year'].astype(int)
     
     return df
 
@@ -109,6 +105,9 @@ def load_inflation_data():
     # Drop NA values (some months have N/A in your file)
     df = df.dropna()
     
+    # Convert year to integer
+    df['year'] = df['year'].astype(int)
+    
     return df
 
 @st.cache_data
@@ -117,7 +116,6 @@ def load_wholesale_data():
     df_wide = pd.read_excel('Copy of Wholesale prices - 2007-2022.xlsx', sheet_name='Sheet1')
     
     # Reshape from wide to long format
-    # Melt all month columns
     month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
     df_long = pd.melt(
@@ -140,6 +138,9 @@ def load_wholesale_data():
     # Drop rows with missing prices
     df_long = df_long.dropna(subset=['price_usd_per_kg'])
     
+    # Convert year to integer
+    df_long['year'] = df_long['year'].astype(int)
+    
     return df_long
 
 @st.cache_data
@@ -161,6 +162,9 @@ def load_macro_data():
         'total_food_imp': 'total_food_imports_usd'
     })
     
+    # Convert year to integer
+    df['year'] = df['year'].astype(int)
+    
     return df
 
 @st.cache_data
@@ -172,18 +176,28 @@ def merge_all_data():
         wholesale = load_wholesale_data()
         macro = load_macro_data()
         
-        # Debug info (will appear in logs, not visible to users)
-        print(f"Climate: {len(climate)} rows")
+        # Debug info (will appear in logs)
+        print(f"Climate: {len(climate)} rows, years {climate['year'].min()}-{climate['year'].max()}")
         print(f"Inflation: {len(inflation)} rows")
-        print(f"Wholesale: {len(wholesale)} rows")
+        print(f"Wholesale: {len(wholesale)} rows, {wholesale['crop'].nunique()} crops")
         print(f"Macro: {len(macro)} rows")
         
         # Merge wholesale with climate
         merged = wholesale.merge(
-            climate[['year', 'month_num', 'temp_avg_c', 'rainfall_mm', 'rain_days', 'storm_days', 'humidity_pct']],
+            climate[['year', 'month_num', 'average_temp_c', 'total_rainfall_mm', 
+                     'total_rain_days', 'storm_days', 'average_relative_humidity_percent']],
             on=['year', 'month_num'],
             how='left'
         )
+        
+        # Rename climate columns for consistency
+        merged = merged.rename(columns={
+            'average_temp_c': 'temp_avg_c',
+            'total_rainfall_mm': 'rainfall_mm',
+            'total_rain_days': 'rain_days',
+            'storm_days': 'storm_days',
+            'average_relative_humidity_percent': 'humidity_pct'
+        })
         
         # Merge with inflation
         merged = merged.merge(
@@ -201,46 +215,25 @@ def merge_all_data():
         
         # Create date label for charts
         merged['date_label'] = merged.apply(
-            lambda x: f"{x['month_short']} {int(x['year'])}",
+            lambda x: f"{x['month_short']} {x['year']}",
             axis=1
         )
+        
+        # Fill any missing inflation values with forward fill
+        merged['inflation_rate'] = merged['inflation_rate'].fillna(method='ffill')
         
         return merged
         
     except Exception as e:
         st.error(f"Error loading data: {e}")
         st.info("Make sure all 4 Excel files are in the same directory as this script.")
+        import traceback
+        st.code(traceback.format_exc())
         return pd.DataFrame()
 
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
-def calculate_seasonal_index(df, crop_name):
-    """Calculate seasonal index (multiplicative method)"""
-    crop_df = df[df['crop'] == crop_name].copy()
-    if len(crop_df) < 24:
-        return None
-    
-    crop_df = crop_df.sort_values(['year', 'month_num'])
-    prices = crop_df['price_usd_per_kg'].values
-    
-    # Calculate seasonal indices by month
-    seasonal_idx = {}
-    for m in range(1, 13):
-        month_prices = crop_df[crop_df['month_num'] == m]['price_usd_per_kg'].values
-        if len(month_prices) > 0:
-            seasonal_idx[m] = np.mean(month_prices)
-        else:
-            seasonal_idx[m] = np.nan
-    
-    # Normalize to index where 1.0 = average
-    avg_price = np.mean(prices)
-    for m in seasonal_idx:
-        if not np.isnan(seasonal_idx[m]):
-            seasonal_idx[m] = seasonal_idx[m] / avg_price
-    
-    return seasonal_idx
 
 def calculate_cv(df, crop_name):
     """Calculate coefficient of variation for a crop"""
@@ -279,11 +272,12 @@ def main():
                - `Copy of Wholesale prices - 2007-2022.xlsx`
                - `Copy of macro data_2007-2022.xlsx`
             
-            3. All files have their first row as column headers (as shown in your screenshots)
+            3. All files have their first row as column headers
             """)
             return
         
         st.success(f"✅ Successfully loaded {len(df):,} price records for {df['crop'].nunique()} crops!")
+        st.info(f"📅 Data range: {df['year'].min()} to {df['year'].max()}")
     
     # Sidebar filters
     st.sidebar.header("🔍 Dashboard Controls")
@@ -300,7 +294,7 @@ def main():
         "Select Crops (max 5 for comparison)",
         crops,
         default=crops[:3] if len(crops) >= 3 else crops
-    )[:5]  # Limit to 5 for readability
+    )[:5]
     
     # Season filter
     season_options = ['All', 'Dry (Jan-May)', 'Wet (Jun-Oct)', 'Post-Wet (Nov-Dec)']
@@ -346,7 +340,6 @@ def main():
             st.metric("Most Volatile", "Select crops")
     
     with col3:
-        # Best selling month based on average prices
         if len(filtered_df) > 0:
             monthly_avg = filtered_df.groupby('month_num')['price_usd_per_kg'].mean()
             best_month_num = monthly_avg.idxmax() if not monthly_avg.empty else 7
@@ -357,7 +350,6 @@ def main():
             st.metric("Best Selling Month", "Select crops")
     
     with col4:
-        # Average rainfall from climate data
         avg_rainfall = df[df['year'].isin(selected_years)]['rainfall_mm'].mean() if len(selected_years) > 0 else 0
         st.metric("Avg Monthly Rainfall", f"{avg_rainfall:.0f} mm")
     
@@ -399,13 +391,28 @@ def main():
         fig_inflation = px.line(
             yearly_prices,
             x='year',
-            y=['price_usd_per_kg', 'inflation_rate'],
+            y='price_usd_per_kg',
             color='crop',
-            title="Crop Prices vs Inflation Rate",
-            labels={'value': '', 'year': 'Year', 'variable': 'Metric'}
+            title="Crop Prices Over Time (with inflation context)",
+            labels={'year': 'Year', 'price_usd_per_kg': 'Price (USD/kg)'},
+            markers=True
         )
+        
+        # Add inflation as a secondary line annotation
         fig_inflation.update_layout(height=400)
         st.plotly_chart(fig_inflation, use_container_width=True)
+        
+        # Show inflation trend separately
+        fig_inflation_trend = px.line(
+            yearly_inflation,
+            x='year',
+            y='inflation_rate',
+            title="Annual Inflation Rate (Moving Average)",
+            labels={'year': 'Year', 'inflation_rate': 'Inflation Rate (%)'},
+            markers=True
+        )
+        fig_inflation_trend.update_layout(height=300)
+        st.plotly_chart(fig_inflation_trend, use_container_width=True)
         
         st.markdown("""
         <div class="insight-box-consumer">
@@ -532,7 +539,7 @@ def main():
     st.markdown("""
     <div class="insight-box-economy">
         <strong>📊 Economic Insight:</strong> Barbados imports 6-7% of GDP as food. 
-        Tourism arrivals dropped 80% during COVID-19 (2020-2021), reducing foreign exchange 
+        Tourism arrivals dropped significantly during COVID-19 (2020-2021), reducing foreign exchange 
         available for food imports and contributing to higher local prices.
     </div>
     """, unsafe_allow_html=True)
@@ -567,7 +574,7 @@ def main():
         labels={'CV (%)': 'Coefficient of Variation (%)'},
         color_discrete_map={'🔴 High': '#ff6b6b', '🟡 Medium': '#ffd93d', '🟢 Low': '#6bcb77'}
     )
-    fig_vol.update_layout(height=450)
+    fig_vol.update_layout(height=450, xaxis={'tickangle': 45})
     st.plotly_chart(fig_vol, use_container_width=True)
     
     # ========================================================================
@@ -587,12 +594,13 @@ def main():
                 if len(current_month) > 0 and len(prev_month) > 0:
                     avg_current = current_month['price_usd_per_kg'].mean()
                     avg_prev = prev_month['price_usd_per_kg'].mean()
-                    pct_change = ((avg_current - avg_prev) / avg_prev) * 100
-                    monthly_changes.append({
-                        'crop': crop,
-                        'month': m,
-                        'pct_change': pct_change
-                    })
+                    if avg_prev > 0:
+                        pct_change = ((avg_current - avg_prev) / avg_prev) * 100
+                        monthly_changes.append({
+                            'crop': crop,
+                            'month': m,
+                            'pct_change': pct_change
+                        })
         
         if monthly_changes:
             change_df = pd.DataFrame(monthly_changes)
@@ -619,8 +627,7 @@ def main():
             <div class="insight-box-farmer">
                 <strong>📈 Price Change Guide:</strong>
                 <ul>
-                    <li>🟢 Green = Price DECREASE (good for buying)</li>
-                    <li>🔴 Red = Price INCREASE (good for selling)</li>
+                    <li>🟢 Green/Red scale: Green = Price DECREASE (good for buying), Red = Price INCREASE (good for selling)</li>
                     <li>July-August shows the strongest price increases across most crops</li>
                     <li>April-May shows the strongest price decreases (harvest season)</li>
                 </ul>
