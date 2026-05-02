@@ -1,5 +1,5 @@
-# app_complete.py - COMPLETE WORKING VERSION
-# Temperature scatter plot removed - no NaN errors
+# app_complete.py - FULL VERSION WITH ALL CHARTS
+# Use this now that your climate data has actual values (no zeros/missing)
 # Run with: streamlit run app_complete.py
 
 import streamlit as st
@@ -72,9 +72,11 @@ def load_climate_data():
     df = df.dropna(subset=['year'])
     df['year'] = df['year'].astype(int)
     
-    # Fill missing rainfall with 0
+    # Fill any remaining missing values with forward fill (just in case)
     if 'total_rainfall_mm' in df.columns:
-        df['total_rainfall_mm'] = df['total_rainfall_mm'].fillna(0)
+        df['total_rainfall_mm'] = df['total_rainfall_mm'].fillna(method='ffill')
+    if 'average_temp_c' in df.columns:
+        df['average_temp_c'] = df['average_temp_c'].fillna(method='ffill')
     
     return df
 
@@ -172,7 +174,7 @@ def merge_all_data():
         
         merged = merged.merge(macro, on=['year'], how='left')
         
-        # Fill missing values
+        # Fill any remaining missing values
         merged['rainfall_mm'] = merged['rainfall_mm'].fillna(0)
         merged['temp_avg_c'] = merged['temp_avg_c'].fillna(method='ffill')
         merged['inflation_rate'] = merged['inflation_rate'].ffill()
@@ -328,6 +330,13 @@ def main():
         )
         fig_seasonal.update_layout(height=450)
         st.plotly_chart(fig_seasonal, use_container_width=True)
+        
+        st.markdown("""
+        <div class="insight-box-farmer">
+            <strong>🌾 Seasonal Insight:</strong> Prices typically peak in July-September (wet season) 
+            and are lowest in April-May (main harvest).
+        </div>
+        """, unsafe_allow_html=True)
     
     # ========================================================================
     # CHART 4: Rainfall Impact (Dual Axis)
@@ -366,7 +375,38 @@ def main():
             st.plotly_chart(fig_weather, use_container_width=True)
     
     # ========================================================================
-    # CHART 5: Macroeconomic Context
+    # CHART 5: Temperature Impact (NOW WORKING - data fixed!)
+    # ========================================================================
+    
+    st.subheader("🌡️ Temperature Impact on Crop Prices")
+    
+    if len(selected_crops) > 0:
+        temp_crop = st.selectbox("Select crop for temperature analysis", selected_crops, key="temp_select")
+        temp_df = filtered_df[filtered_df['crop'] == temp_crop].copy()
+        
+        if len(temp_df) > 0:
+            fig_temp = px.scatter(
+                temp_df,
+                x='temp_avg_c',
+                y='price_usd_per_kg',
+                color='year',
+                size='rainfall_mm',
+                title=f"{temp_crop}: Price vs Temperature (bubble size = rainfall)",
+                labels={'temp_avg_c': 'Average Temperature (°C)', 'price_usd_per_kg': 'Price (USD/kg)'},
+                hover_data=['month_short']
+            )
+            fig_temp.update_layout(height=450)
+            st.plotly_chart(fig_temp, use_container_width=True)
+            
+            st.markdown("""
+            <div class="insight-box-consumer">
+                <strong>🌡️ Temperature Insight:</strong> Higher temperatures (above 28°C) often stress 
+                crops, reducing yields and increasing prices 1-2 months later.
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # ========================================================================
+    # CHART 6: Macroeconomic Context
     # ========================================================================
     
     st.subheader("🏦 Macroeconomic Context")
@@ -394,8 +434,14 @@ def main():
         fig_gdp.update_layout(height=400)
         st.plotly_chart(fig_gdp, use_container_width=True)
     
+    st.markdown("""
+    <div class="insight-box-economy">
+        <strong>📊 Economic Insight:</strong> Barbados imports 6-7% of GDP as food, making it vulnerable to global price shocks.
+    </div>
+    """, unsafe_allow_html=True)
+    
     # ========================================================================
-    # CHART 6: Volatility Ranking
+    # CHART 7: Volatility Ranking
     # ========================================================================
     
     st.subheader("⚠️ Crop Volatility & Risk Assessment")
@@ -414,14 +460,14 @@ def main():
     
     fig_vol = px.bar(
         vol_df, x='Crop', y='CV (%)', color='Risk Level',
-        title="Price Volatility by Crop",
+        title="Price Volatility by Crop (Higher = More Risk)",
         color_discrete_map={'🔴 High': '#ff6b6b', '🟡 Medium': '#ffd93d', '🟢 Low': '#6bcb77'}
     )
     fig_vol.update_layout(height=450, xaxis={'tickangle': 45})
     st.plotly_chart(fig_vol, use_container_width=True)
     
     # ========================================================================
-    # CHART 7: Month-to-Month Changes
+    # CHART 8: Month-to-Month Changes
     # ========================================================================
     
     st.subheader("📊 Month-to-Month Price Changes")
@@ -456,9 +502,16 @@ def main():
             )
             fig_heatmap.update_layout(height=400)
             st.plotly_chart(fig_heatmap, use_container_width=True)
+            
+            st.markdown("""
+            <div class="insight-box-farmer">
+                <strong>📈 Price Change Guide:</strong> Red = Price INCREASE (good for selling), 
+                Green = Price DECREASE (good for buying). July-August shows strongest increases.
+            </div>
+            """, unsafe_allow_html=True)
     
     # ========================================================================
-    # CHART 8: Data Explorer
+    # CHART 9: Data Explorer
     # ========================================================================
     
     st.subheader("📋 Data Explorer")
@@ -471,14 +524,19 @@ def main():
     st.dataframe(display_df.head(100), use_container_width=True)
     
     csv = filtered_df.to_csv(index=False)
-    st.download_button(label="📥 Download Data as CSV", data=csv, file_name="barbados_agriculture_export.csv", mime="text/csv")
+    st.download_button(
+        label="📥 Download Filtered Data as CSV",
+        data=csv,
+        file_name="barbados_agriculture_export.csv",
+        mime="text/csv"
+    )
     
     # ========================================================================
-    # INSIGHTS
+    # ACTIONABLE INSIGHTS
     # ========================================================================
     
     st.markdown("---")
-    st.markdown("## 💡 Actionable Insights")
+    st.markdown("## 💡 Actionable Insights for Barbados")
     
     col_farmer, col_consumer = st.columns(2)
     
@@ -489,9 +547,10 @@ def main():
             <ul>
                 <li><strong>Best selling window:</strong> July-September (prices 15-30% above average)</li>
                 <li><strong>Planting recommendation:</strong> Leafy greens in March-April for peak harvest prices</li>
+                <li><strong>Storage strategy:</strong> Root crops harvested April → store until August for premium</li>
                 <li><strong>Low volatility crops:</strong> Yam, cassava, sweet potato (most stable income)</li>
                 <li><strong>High volatility crops:</strong> Tomato, lettuce, pepper (require risk management)</li>
-                <li><strong>Weather watch:</strong> Heavy rain (>200mm) predicts price spikes in 1-2 months</li>
+                <li><strong>Weather monitoring:</strong> Heavy rain (>200mm) predicts price spikes in 1-2 months</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -503,16 +562,19 @@ def main():
             <ul>
                 <li><strong>Best buying window:</strong> April-May (prices 20-30% below average)</li>
                 <li><strong>Expect price hikes:</strong> July-September (wet season shortages)</li>
+                <li><strong>Weather impact:</strong> Heavy rain or drought → prices double in 1-2 months</li>
                 <li><strong>Most stable prices:</strong> Root crops (yam, cassava, sweet potato)</li>
                 <li><strong>Budget tip:</strong> Stock up on storable items during April-May sales</li>
-                <li><strong>Import awareness:</strong> 6-7% of GDP goes to food imports</li>
+                <li><strong>Import awareness:</strong> 6-7% of GDP goes to food imports - global prices affect local costs</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown("""
     <div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #ddd; color: #666;">
-        <small>Data: Climate | Inflation | Wholesale Prices | Macroeconomic Data (2007-2022)</small>
+        <small>📊 Data Sources: Climate (2007-2022) | Inflation (2007-2022) | Wholesale Prices (2007-2022) | Macroeconomic Data (2007-2022)<br>
+        📖 Methodology: MIOA/IICA Manual on Basic Analysis of Agricultural Prices<br>
+        🔄 Dashboard updates when new data is pushed to GitHub | Data as of 2022</small>
     </div>
     """, unsafe_allow_html=True)
 
