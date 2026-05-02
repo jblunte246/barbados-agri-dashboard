@@ -1,6 +1,5 @@
-# app_complete.py
-# Barbados Agri-Climate-Economy Intelligence Dashboard
-# Full working version - Year column now formatted as Plain Text in Excel
+# app_complete.py - FULL VERSION WITH ALL CHARTS
+# Use this now that your climate data has actual values (no zeros/missing)
 # Run with: streamlit run app_complete.py
 
 import streamlit as st
@@ -16,7 +15,6 @@ warnings.filterwarnings('ignore')
 if not hasattr(np, 'float'):
     np.float = float
 
-# Page configuration
 st.set_page_config(
     page_title="Barbados Agri-Climate-Economy Intelligence",
     page_icon="🌾",
@@ -56,13 +54,6 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
-    .kpi-card {
-        background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
-        padding: 1rem;
-        border-radius: 15px;
-        text-align: center;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,50 +63,42 @@ st.markdown("""
 
 @st.cache_data
 def load_climate_data():
-    """Load climate data"""
     df = pd.read_excel('Copy of climate data 2007_2022.xlsx', sheet_name='Sheet1')
     
-    # Create month number for sorting
     month_map = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6,
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
     df['month_num'] = df['month'].map(month_map)
     
-    # Drop rows with missing year
     df = df.dropna(subset=['year'])
-    
-    # Convert year to integer
     df['year'] = df['year'].astype(int)
+    
+    # Fill any remaining missing values with forward fill (just in case)
+    if 'total_rainfall_mm' in df.columns:
+        df['total_rainfall_mm'] = df['total_rainfall_mm'].fillna(method='ffill')
+    if 'average_temp_c' in df.columns:
+        df['average_temp_c'] = df['average_temp_c'].fillna(method='ffill')
     
     return df
 
 @st.cache_data
 def load_inflation_data():
-    """Load inflation data"""
     df = pd.read_excel('Copy of inflation_data_2007 to 2022 base_yr_july_2001.xlsx', sheet_name='Sheet1')
     
-    # Create month number
     month_map = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6,
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
     df['month_num'] = df['month'].map(month_map)
     
-    # Keep only needed columns
     df = df[['year', 'month_num', 'moving_avg_inflation']]
     df = df.rename(columns={'moving_avg_inflation': 'inflation_rate'})
-    
-    # Drop NA values
     df = df.dropna()
-    
-    # Convert year to integer
     df['year'] = df['year'].astype(int)
     
     return df
 
 @st.cache_data
 def load_wholesale_data():
-    """Load wholesale data - year column now formatted as Plain Text"""
     df_wide = pd.read_excel('Copy of Wholesale prices - 2007-2022.xlsx', sheet_name='Sheet1')
     
-    # Reshape from wide to long format
     month_cols = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
     df_long = pd.melt(
@@ -126,29 +109,22 @@ def load_wholesale_data():
         value_name='price_usd_per_kg'
     )
     
-    # Rename columns
     df_long = df_long.rename(columns={'product': 'crop'})
-    
-    # Convert year to integer (now safe because formatted as Plain Text)
     df_long['year'] = df_long['year'].astype(int)
     
-    # Create month number
     month_map = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6,
                  'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
     df_long['month_num'] = df_long['month'].map(month_map)
     df_long['month_short'] = df_long['month']
     
-    # Drop rows with missing prices
     df_long = df_long.dropna(subset=['price_usd_per_kg'])
     
     return df_long
 
 @st.cache_data
 def load_macro_data():
-    """Load macroeconomic data"""
     df = pd.read_excel('Copy of macro data_2007-2022.xlsx', sheet_name='Sheet1')
     
-    # Rename columns for clarity
     df = df.rename(columns={
         'food_imp_per_gdp': 'food_import_pct_gdp',
         'tour_arrival': 'tourism_arrivals',
@@ -162,27 +138,19 @@ def load_macro_data():
         'total_food_imp': 'total_food_imports_usd'
     })
     
-    # Convert year to integer
     df['year'] = df['year'].astype(int)
     
     return df
 
 @st.cache_data
 def merge_all_data():
-    """Merge all four data sources"""
     try:
         climate = load_climate_data()
         inflation = load_inflation_data()
         wholesale = load_wholesale_data()
         macro = load_macro_data()
         
-        # Debug info
-        print(f"Climate: {len(climate)} rows")
-        print(f"Inflation: {len(inflation)} rows")
-        print(f"Wholesale: {len(wholesale)} rows, {wholesale['crop'].nunique()} crops")
-        print(f"Macro: {len(macro)} rows")
-        
-        # Merge wholesale with climate
+        # Merge
         merged = wholesale.merge(
             climate[['year', 'month_num', 'average_temp_c', 'total_rainfall_mm', 
                      'total_rain_days', 'storm_days', 'average_relative_humidity_percent']],
@@ -190,7 +158,6 @@ def merge_all_data():
             how='left'
         )
         
-        # Rename climate columns for consistency
         merged = merged.rename(columns={
             'average_temp_c': 'temp_avg_c',
             'total_rainfall_mm': 'rainfall_mm',
@@ -199,48 +166,36 @@ def merge_all_data():
             'average_relative_humidity_percent': 'humidity_pct'
         })
         
-        # Merge with inflation
         merged = merged.merge(
             inflation[['year', 'month_num', 'inflation_rate']],
             on=['year', 'month_num'],
             how='left'
         )
         
-        # Merge with macro data (year-level only)
-        merged = merged.merge(
-            macro,
-            on=['year'],
-            how='left'
-        )
+        merged = merged.merge(macro, on=['year'], how='left')
         
-        # Create date label for charts
+        # Fill any remaining missing values
+        merged['rainfall_mm'] = merged['rainfall_mm'].fillna(0)
+        merged['temp_avg_c'] = merged['temp_avg_c'].fillna(method='ffill')
+        merged['inflation_rate'] = merged['inflation_rate'].ffill()
+        
         merged['date_label'] = merged.apply(
             lambda x: f"{x['month_short']} {x['year']}",
             axis=1
         )
         
-        # FIXED: Use ffill() instead of fillna(method='ffill')
-        merged['inflation_rate'] = merged['inflation_rate'].ffill()
-        
         return merged
         
     except Exception as e:
         st.error(f"Error loading data: {e}")
-        st.info("Make sure all 4 Excel files are in the same directory as this script.")
         import traceback
         st.code(traceback.format_exc())
         return pd.DataFrame()
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
 def calculate_cv(df, crop_name):
-    """Calculate coefficient of variation for a crop"""
     crop_prices = df[df['crop'] == crop_name]['price_usd_per_kg']
     if len(crop_prices) > 1:
-        cv = crop_prices.std() / crop_prices.mean() * 100
-        return cv
+        return crop_prices.std() / crop_prices.mean() * 100
     return 0
 
 # ============================================================================
@@ -248,7 +203,6 @@ def calculate_cv(df, crop_name):
 # ============================================================================
 
 def main():
-    # Header
     st.markdown("""
     <div class="main-header">
         <h1>🌾 Barbados Agri-Climate-Economy Intelligence Dashboard</h1>
@@ -258,43 +212,30 @@ def main():
     """, unsafe_allow_html=True)
     
     # Load data
-    with st.spinner("Loading and analyzing data from 4 Excel files..."):
+    with st.spinner("Loading data..."):
         df = merge_all_data()
         
-        if df.empty or len(df) == 0:
-            st.error("""
-            ❌ **Failed to load data. Please verify:**
-            
-            1. All 4 Excel files are in the same directory
-            2. File names match exactly:
-               - `Copy of climate data 2007_2022.xlsx`
-               - `Copy of inflation_data_2007 to 2022 base_yr_july_2001.xlsx`
-               - `Copy of Wholesale prices - 2007-2022.xlsx`
-               - `Copy of macro data_2007-2022.xlsx`
-            """)
+        if df.empty:
+            st.error("Failed to load data. Check that all 4 Excel files are in the directory.")
             return
         
-        st.success(f"✅ Successfully loaded {len(df):,} price records for {df['crop'].nunique()} crops!")
-        st.info(f"📅 Data range: {df['year'].min()} to {df['year'].max()}")
+        st.success(f"✅ Loaded {len(df):,} price records for {df['crop'].nunique()} crops!")
     
     # Sidebar filters
     st.sidebar.header("🔍 Dashboard Controls")
     
     years = sorted(df['year'].unique())
     selected_years = st.sidebar.multiselect(
-        "Select Years",
-        years,
+        "Select Years", years,
         default=[years[-3], years[-2], years[-1]] if len(years) >= 3 else years
     )
     
     crops = sorted(df['crop'].unique())
     selected_crops = st.sidebar.multiselect(
-        "Select Crops (max 5 for comparison)",
-        crops,
+        "Select Crops", crops,
         default=crops[:3] if len(crops) >= 3 else crops
     )[:5]
     
-    # Season filter
     season_options = ['All', 'Dry (Jan-May)', 'Wet (Jun-Oct)', 'Post-Wet (Nov-Dec)']
     selected_season = st.sidebar.selectbox("Season Filter", season_options)
     
@@ -319,23 +260,14 @@ def main():
     
     with col1:
         avg_price = filtered_df['price_usd_per_kg'].mean() if len(filtered_df) > 0 else 0
-        overall_avg = df['price_usd_per_kg'].mean()
-        delta = avg_price - overall_avg
-        st.metric("Avg Price (Selected)", f"${avg_price:.2f}/kg", f"{delta:+.2f}")
+        st.metric("Avg Price (Selected)", f"${avg_price:.2f}/kg")
     
     with col2:
         if len(selected_crops) > 0:
-            volatilities = {}
-            for crop in selected_crops:
-                cv = calculate_cv(df, crop)
-                volatilities[crop] = cv
-            if volatilities:
-                most_volatile = max(volatilities, key=volatilities.get)
-                st.metric("Most Volatile", most_volatile, f"{volatilities[most_volatile]:.0f}% CV")
-            else:
-                st.metric("Most Volatile", "N/A")
-        else:
-            st.metric("Most Volatile", "Select crops")
+            vols = {crop: calculate_cv(df, crop) for crop in selected_crops}
+            if vols:
+                most_volatile = max(vols, key=vols.get)
+                st.metric("Most Volatile", most_volatile, f"{vols[most_volatile]:.0f}% CV")
     
     with col3:
         if len(filtered_df) > 0:
@@ -344,15 +276,13 @@ def main():
             month_names = {1:'Jan',2:'Feb',3:'Mar',4:'Apr',5:'May',6:'Jun',
                           7:'Jul',8:'Aug',9:'Sep',10:'Oct',11:'Nov',12:'Dec'}
             st.metric("Best Selling Month", month_names.get(best_month_num, 'Jul-Aug'))
-        else:
-            st.metric("Best Selling Month", "Select crops")
     
     with col4:
-        avg_rainfall = df[df['year'].isin(selected_years)]['rainfall_mm'].mean() if len(selected_years) > 0 else 0
+        avg_rainfall = df[df['year'].isin(selected_years)]['rainfall_mm'].mean() if selected_years else 0
         st.metric("Avg Monthly Rainfall", f"{avg_rainfall:.0f} mm")
     
     # ========================================================================
-    # CHART 1: Price Trends Over Time
+    # CHART 1: Price Trends
     # ========================================================================
     
     st.markdown("---")
@@ -360,76 +290,41 @@ def main():
     
     if len(selected_crops) > 0 and len(filtered_df) > 0:
         fig_trend = px.line(
-            filtered_df,
-            x='date_label',
-            y='price_usd_per_kg',
-            color='crop',
-            title="Wholesale Price Trends by Month",
+            filtered_df, x='date_label', y='price_usd_per_kg',
+            color='crop', title="Wholesale Price Trends by Month",
             labels={'date_label': 'Month', 'price_usd_per_kg': 'Price (USD/kg)'},
             markers=True
         )
-        fig_trend.update_layout(height=450, legend_title_text='Crop')
+        fig_trend.update_layout(height=450)
         st.plotly_chart(fig_trend, use_container_width=True)
-    else:
-        st.info("Select crops and years to view price trends")
     
     # ========================================================================
-    # CHART 2: Inflation and Price Relationship
+    # CHART 2: Inflation
     # ========================================================================
     
-    st.subheader("💰 Inflation vs. Wholesale Prices")
+    st.subheader("💰 Inflation Rate Over Time")
     
-    if len(selected_crops) > 0 and len(filtered_df) > 0:
-        # Aggregate by year
-        yearly_prices = filtered_df.groupby(['year', 'crop'])['price_usd_per_kg'].mean().reset_index()
-        
-        fig_inflation = px.line(
-            yearly_prices,
-            x='year',
-            y='price_usd_per_kg',
-            color='crop',
-            title="Crop Prices Over Time",
-            labels={'year': 'Year', 'price_usd_per_kg': 'Price (USD/kg)'},
-            markers=True
-        )
-        fig_inflation.update_layout(height=400)
-        st.plotly_chart(fig_inflation, use_container_width=True)
-        
-        # Show inflation trend separately
-        yearly_inflation = df[['year', 'inflation_rate']].drop_duplicates().sort_values('year')
-        fig_inflation_trend = px.line(
-            yearly_inflation,
-            x='year',
-            y='inflation_rate',
-            title="Annual Inflation Rate (Moving Average)",
-            labels={'year': 'Year', 'inflation_rate': 'Inflation Rate (%)'},
-            markers=True
-        )
-        fig_inflation_trend.update_layout(height=300)
-        st.plotly_chart(fig_inflation_trend, use_container_width=True)
-        
-        st.markdown("""
-        <div class="insight-box-consumer">
-            <strong>🛒 What this means:</strong> When inflation rises, crop prices typically follow. 
-            The COVID-19 period (2020-2022) shows both inflation and food prices increased sharply.
-        </div>
-        """, unsafe_allow_html=True)
+    yearly_inflation = df[['year', 'inflation_rate']].drop_duplicates().sort_values('year')
+    fig_inflation = px.line(
+        yearly_inflation, x='year', y='inflation_rate',
+        title="Annual Inflation Rate (Moving Average)",
+        labels={'year': 'Year', 'inflation_rate': 'Inflation Rate (%)'},
+        markers=True
+    )
+    fig_inflation.update_layout(height=400)
+    st.plotly_chart(fig_inflation, use_container_width=True)
     
     # ========================================================================
-    # CHART 3: Seasonal Patterns (Boxplot)
+    # CHART 3: Seasonal Patterns
     # ========================================================================
     
     st.subheader("📅 Seasonal Price Patterns")
     
     if len(selected_crops) > 0 and len(filtered_df) > 0:
         month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        
         fig_seasonal = px.box(
-            filtered_df,
-            x='month_short',
-            y='price_usd_per_kg',
-            color='crop',
-            title="Price Distribution by Month - Seasonal Patterns",
+            filtered_df, x='month_short', y='price_usd_per_kg', color='crop',
+            title="Price Distribution by Month",
             labels={'month_short': 'Month', 'price_usd_per_kg': 'Price (USD/kg)'},
             category_orders={'month_short': month_order}
         )
@@ -439,12 +334,12 @@ def main():
         st.markdown("""
         <div class="insight-box-farmer">
             <strong>🌾 Seasonal Insight:</strong> Prices typically peak in July-September (wet season) 
-            and are lowest in April-May (main harvest). Plan harvest and storage accordingly.
+            and are lowest in April-May (main harvest).
         </div>
         """, unsafe_allow_html=True)
     
     # ========================================================================
-    # CHART 4: Rainfall Impact on Prices
+    # CHART 4: Rainfall Impact (Dual Axis)
     # ========================================================================
     
     st.subheader("🌧️ Weather Impact: Rainfall vs Crop Prices")
@@ -458,10 +353,8 @@ def main():
             
             fig_weather.add_trace(
                 go.Scatter(
-                    x=weather_df['date_label'],
-                    y=weather_df['price_usd_per_kg'],
-                    mode='lines+markers',
-                    name=f'{weather_crop} Price',
+                    x=weather_df['date_label'], y=weather_df['price_usd_per_kg'],
+                    mode='lines+markers', name=f'{weather_crop} Price',
                     line=dict(color='green', width=2)
                 ),
                 secondary_y=False
@@ -469,168 +362,20 @@ def main():
             
             fig_weather.add_trace(
                 go.Bar(
-                    x=weather_df['date_label'],
-                    y=weather_df['rainfall_mm'],
-                    name='Rainfall (mm)',
-                    marker_color='lightblue',
-                    opacity=0.5
+                    x=weather_df['date_label'], y=weather_df['rainfall_mm'],
+                    name='Rainfall (mm)', marker_color='lightblue', opacity=0.5
                 ),
                 secondary_y=True
             )
             
-            fig_weather.update_layout(
-                title=f"{weather_crop} Price vs Monthly Rainfall",
-                height=450,
-                hovermode='x unified'
-            )
+            fig_weather.update_layout(title=f"{weather_crop} Price vs Monthly Rainfall", height=450)
             fig_weather.update_yaxes(title_text="Price (USD/kg)", secondary_y=False)
             fig_weather.update_yaxes(title_text="Rainfall (mm)", secondary_y=True)
             
             st.plotly_chart(fig_weather, use_container_width=True)
-            
-            # Highlight extreme rainfall events
-            extreme_rain = weather_df[weather_df['rainfall_mm'] > 200]
-            if len(extreme_rain) > 0:
-                st.info(f"⚠️ **Notice:** {len(extreme_rain)} months had rainfall exceeding 200mm. Historically, such events lead to price increases 1-2 months later.")
     
     # ========================================================================
-    # CHART 5: Macroeconomic Context
-    # ========================================================================
-    
-    st.subheader("🏦 Macroeconomic Context: Food Imports & GDP")
-    
-    macro_df = df[['year', 'food_import_pct_gdp', 'agri_pct_gdp', 'gdp_growth_pct', 'tourism_arrivals']].drop_duplicates()
-    macro_df = macro_df[macro_df['year'].isin(selected_years)]
-    
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        fig_imports = px.line(
-            macro_df,
-            x='year',
-            y='food_import_pct_gdp',
-            title="Food Imports as % of GDP",
-            markers=True,
-            labels={'food_import_pct_gdp': '% of GDP', 'year': 'Year'}
-        )
-        fig_imports.add_hline(y=6.5, line_dash="dash", line_color="orange", annotation_text="Average (6.5%)")
-        fig_imports.update_layout(height=400)
-        st.plotly_chart(fig_imports, use_container_width=True)
-    
-    with col_right:
-        fig_gdp = px.bar(
-            macro_df,
-            x='year',
-            y='gdp_growth_pct',
-            title="GDP Growth Rate",
-            labels={'gdp_growth_pct': 'GDP Growth (%)', 'year': 'Year'},
-            color='gdp_growth_pct',
-            color_continuous_scale='RdYlGn'
-        )
-        fig_gdp.update_layout(height=400)
-        st.plotly_chart(fig_gdp, use_container_width=True)
-    
-    st.markdown("""
-    <div class="insight-box-economy">
-        <strong>📊 Economic Insight:</strong> Barbados imports 6-7% of GDP as food. 
-        Tourism arrivals dropped significantly during COVID-19 (2020-2021), reducing foreign exchange 
-        available for food imports and contributing to higher local prices.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # ========================================================================
-    # CHART 6: Volatility Ranking
-    # ========================================================================
-    
-    st.subheader("⚠️ Crop Volatility & Risk Assessment")
-    
-    # Calculate volatility for all crops
-    all_crops = df['crop'].unique()
-    volatility_data = []
-    for crop in all_crops:
-        cv = calculate_cv(df, crop)
-        avg_price = df[df['crop'] == crop]['price_usd_per_kg'].mean()
-        volatility_data.append({
-            'Crop': crop,
-            'CV (%)': round(cv, 1),
-            'Risk Level': '🔴 High' if cv > 40 else '🟡 Medium' if cv > 25 else '🟢 Low',
-            'Avg Price ($/kg)': round(avg_price, 2)
-        })
-    
-    vol_df = pd.DataFrame(volatility_data).sort_values('CV (%)', ascending=False).head(15)
-    
-    fig_vol = px.bar(
-        vol_df,
-        x='Crop',
-        y='CV (%)',
-        color='Risk Level',
-        title="Price Volatility by Crop (Higher = More Risk)",
-        labels={'CV (%)': 'Coefficient of Variation (%)'},
-        color_discrete_map={'🔴 High': '#ff6b6b', '🟡 Medium': '#ffd93d', '🟢 Low': '#6bcb77'}
-    )
-    fig_vol.update_layout(height=450, xaxis={'tickangle': 45})
-    st.plotly_chart(fig_vol, use_container_width=True)
-    
-    # ========================================================================
-    # CHART 7: Month-to-Month Price Changes (Heatmap)
-    # ========================================================================
-    
-    st.subheader("📊 Month-to-Month Price Changes")
-    
-    if len(selected_crops) > 0:
-        # Calculate average month-to-month changes
-        monthly_changes = []
-        for crop in selected_crops:
-            crop_df = df[df['crop'] == crop].sort_values(['year', 'month_num'])
-            for m in range(1, 13):
-                current_month = crop_df[crop_df['month_num'] == m]
-                prev_month = crop_df[crop_df['month_num'] == (m-1 if m>1 else 12)]
-                if len(current_month) > 0 and len(prev_month) > 0:
-                    avg_current = current_month['price_usd_per_kg'].mean()
-                    avg_prev = prev_month['price_usd_per_kg'].mean()
-                    if avg_prev > 0:
-                        pct_change = ((avg_current - avg_prev) / avg_prev) * 100
-                        monthly_changes.append({
-                            'crop': crop,
-                            'month': m,
-                            'pct_change': pct_change
-                        })
-        
-        if monthly_changes:
-            change_df = pd.DataFrame(monthly_changes)
-            month_names = {1:'Jan→Feb', 2:'Feb→Mar', 3:'Mar→Apr', 4:'Apr→May', 5:'May→Jun',
-                          6:'Jun→Jul', 7:'Jul→Aug', 8:'Aug→Sep', 9:'Sep→Oct', 10:'Oct→Nov',
-                          11:'Nov→Dec', 12:'Dec→Jan'}
-            change_df['month_label'] = change_df['month'].map(month_names)
-            
-            # Pivot for heatmap
-            pivot_df = change_df.pivot(index='crop', columns='month_label', values='pct_change')
-            
-            fig_heatmap = px.imshow(
-                pivot_df,
-                title="Average Month-to-Month Price Changes (%)",
-                labels={'x': 'Month Transition', 'y': 'Crop', 'color': '% Change'},
-                color_continuous_scale='RdYlGn',
-                aspect='auto',
-                text_auto='.1f'
-            )
-            fig_heatmap.update_layout(height=400)
-            st.plotly_chart(fig_heatmap, use_container_width=True)
-            
-            st.markdown("""
-            <div class="insight-box-farmer">
-                <strong>📈 Price Change Guide:</strong>
-                <ul>
-                    <li>🟢 Green = Price DECREASE (good for buying)</li>
-                    <li>🔴 Red = Price INCREASE (good for selling)</li>
-                    <li>July-August shows the strongest price increases across most crops</li>
-                    <li>April-May shows the strongest price decreases (harvest season)</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # ========================================================================
-    # CHART 8: Temperature Impact
+    # CHART 5: Temperature Impact (NOW WORKING - data fixed!)
     # ========================================================================
     
     st.subheader("🌡️ Temperature Impact on Crop Prices")
@@ -646,7 +391,7 @@ def main():
                 y='price_usd_per_kg',
                 color='year',
                 size='rainfall_mm',
-                title=f"{temp_crop} Price vs Temperature",
+                title=f"{temp_crop}: Price vs Temperature (bubble size = rainfall)",
                 labels={'temp_avg_c': 'Average Temperature (°C)', 'price_usd_per_kg': 'Price (USD/kg)'},
                 hover_data=['month_short']
             )
@@ -661,25 +406,123 @@ def main():
             """, unsafe_allow_html=True)
     
     # ========================================================================
+    # CHART 6: Macroeconomic Context
+    # ========================================================================
+    
+    st.subheader("🏦 Macroeconomic Context")
+    
+    macro_df = df[['year', 'food_import_pct_gdp', 'agri_pct_gdp', 'gdp_growth_pct']].drop_duplicates()
+    macro_df = macro_df[macro_df['year'].isin(selected_years)]
+    
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        fig_imports = px.line(
+            macro_df, x='year', y='food_import_pct_gdp',
+            title="Food Imports as % of GDP", markers=True
+        )
+        fig_imports.add_hline(y=6.5, line_dash="dash", line_color="orange", annotation_text="Avg 6.5%")
+        fig_imports.update_layout(height=400)
+        st.plotly_chart(fig_imports, use_container_width=True)
+    
+    with col_right:
+        fig_gdp = px.bar(
+            macro_df, x='year', y='gdp_growth_pct',
+            title="GDP Growth Rate", color='gdp_growth_pct',
+            color_continuous_scale='RdYlGn'
+        )
+        fig_gdp.update_layout(height=400)
+        st.plotly_chart(fig_gdp, use_container_width=True)
+    
+    st.markdown("""
+    <div class="insight-box-economy">
+        <strong>📊 Economic Insight:</strong> Barbados imports 6-7% of GDP as food, making it vulnerable to global price shocks.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ========================================================================
+    # CHART 7: Volatility Ranking
+    # ========================================================================
+    
+    st.subheader("⚠️ Crop Volatility & Risk Assessment")
+    
+    vol_data = []
+    for crop in df['crop'].unique():
+        cv = calculate_cv(df, crop)
+        avg_price = df[df['crop'] == crop]['price_usd_per_kg'].mean()
+        vol_data.append({
+            'Crop': crop, 'CV (%)': round(cv, 1),
+            'Risk Level': '🔴 High' if cv > 40 else '🟡 Medium' if cv > 25 else '🟢 Low',
+            'Avg Price ($/kg)': round(avg_price, 2)
+        })
+    
+    vol_df = pd.DataFrame(vol_data).sort_values('CV (%)', ascending=False).head(15)
+    
+    fig_vol = px.bar(
+        vol_df, x='Crop', y='CV (%)', color='Risk Level',
+        title="Price Volatility by Crop (Higher = More Risk)",
+        color_discrete_map={'🔴 High': '#ff6b6b', '🟡 Medium': '#ffd93d', '🟢 Low': '#6bcb77'}
+    )
+    fig_vol.update_layout(height=450, xaxis={'tickangle': 45})
+    st.plotly_chart(fig_vol, use_container_width=True)
+    
+    # ========================================================================
+    # CHART 8: Month-to-Month Changes
+    # ========================================================================
+    
+    st.subheader("📊 Month-to-Month Price Changes")
+    
+    if len(selected_crops) > 0:
+        monthly_changes = []
+        for crop in selected_crops:
+            crop_df = df[df['crop'] == crop].sort_values(['year', 'month_num'])
+            for m in range(1, 13):
+                curr = crop_df[crop_df['month_num'] == m]
+                prev = crop_df[crop_df['month_num'] == (m-1 if m>1 else 12)]
+                if len(curr) > 0 and len(prev) > 0:
+                    avg_curr = curr['price_usd_per_kg'].mean()
+                    avg_prev = prev['price_usd_per_kg'].mean()
+                    if avg_prev > 0:
+                        pct = ((avg_curr - avg_prev) / avg_prev) * 100
+                        monthly_changes.append({'crop': crop, 'month': m, 'pct_change': pct})
+        
+        if monthly_changes:
+            change_df = pd.DataFrame(monthly_changes)
+            month_names = {1:'Jan→Feb', 2:'Feb→Mar', 3:'Mar→Apr', 4:'Apr→May', 5:'May→Jun',
+                          6:'Jun→Jul', 7:'Jul→Aug', 8:'Aug→Sep', 9:'Sep→Oct', 10:'Oct→Nov',
+                          11:'Nov→Dec', 12:'Dec→Jan'}
+            change_df['month_label'] = change_df['month'].map(month_names)
+            
+            pivot_df = change_df.pivot(index='crop', columns='month_label', values='pct_change')
+            
+            fig_heatmap = px.imshow(
+                pivot_df, title="Average Month-to-Month Price Changes (%)",
+                labels={'x': 'Month Transition', 'y': 'Crop', 'color': '% Change'},
+                color_continuous_scale='RdYlGn', aspect='auto', text_auto='.1f'
+            )
+            fig_heatmap.update_layout(height=400)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+            
+            st.markdown("""
+            <div class="insight-box-farmer">
+                <strong>📈 Price Change Guide:</strong> Red = Price INCREASE (good for selling), 
+                Green = Price DECREASE (good for buying). July-August shows strongest increases.
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # ========================================================================
     # CHART 9: Data Explorer
     # ========================================================================
     
     st.subheader("📋 Data Explorer")
     
-    # Create a clean display table
     display_df = filtered_df[['year', 'month_short', 'crop', 'price_usd_per_kg', 'rainfall_mm', 'temp_avg_c', 'inflation_rate']].copy()
     display_df = display_df.rename(columns={
-        'month_short': 'Month',
-        'crop': 'Crop',
-        'price_usd_per_kg': 'Price (USD/kg)',
-        'rainfall_mm': 'Rainfall (mm)',
-        'temp_avg_c': 'Temp (°C)',
-        'inflation_rate': 'Inflation (%)'
+        'month_short': 'Month', 'crop': 'Crop', 'price_usd_per_kg': 'Price (USD/kg)',
+        'rainfall_mm': 'Rainfall (mm)', 'temp_avg_c': 'Temp (°C)', 'inflation_rate': 'Inflation (%)'
     })
-    
     st.dataframe(display_df.head(100), use_container_width=True)
     
-    # Download button
     csv = filtered_df.to_csv(index=False)
     st.download_button(
         label="📥 Download Filtered Data as CSV",
@@ -727,7 +570,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
     
-    # Footer
     st.markdown("""
     <div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #ddd; color: #666;">
         <small>📊 Data Sources: Climate (2007-2022) | Inflation (2007-2022) | Wholesale Prices (2007-2022) | Macroeconomic Data (2007-2022)<br>
