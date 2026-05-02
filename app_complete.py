@@ -1,5 +1,5 @@
-# app_complete.py - FULL VERSION WITH ALL CHARTS
-# Use this now that your climate data has actual values (no zeros/missing)
+# app_complete.py - FULL WORKING VERSION
+# Fixed for pandas 3.0+ (no fillna(method=...))
 # Run with: streamlit run app_complete.py
 
 import streamlit as st
@@ -58,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# DATA LOADING FUNCTIONS
+# DATA LOADING FUNCTIONS - FIXED for pandas 3.0+
 # ============================================================================
 
 @st.cache_data
@@ -72,11 +72,11 @@ def load_climate_data():
     df = df.dropna(subset=['year'])
     df['year'] = df['year'].astype(int)
     
-    # Fill any remaining missing values with forward fill (just in case)
+    # FIXED: Use ffill() instead of fillna(method='ffill')
     if 'total_rainfall_mm' in df.columns:
-        df['total_rainfall_mm'] = df['total_rainfall_mm'].fillna(method='ffill')
+        df['total_rainfall_mm'] = df['total_rainfall_mm'].ffill()
     if 'average_temp_c' in df.columns:
-        df['average_temp_c'] = df['average_temp_c'].fillna(method='ffill')
+        df['average_temp_c'] = df['average_temp_c'].ffill()
     
     return df
 
@@ -174,9 +174,9 @@ def merge_all_data():
         
         merged = merged.merge(macro, on=['year'], how='left')
         
-        # Fill any remaining missing values
+        # FIXED: Use ffill() instead of fillna(method='ffill')
         merged['rainfall_mm'] = merged['rainfall_mm'].fillna(0)
-        merged['temp_avg_c'] = merged['temp_avg_c'].fillna(method='ffill')
+        merged['temp_avg_c'] = merged['temp_avg_c'].ffill()
         merged['inflation_rate'] = merged['inflation_rate'].ffill()
         
         merged['date_label'] = merged.apply(
@@ -375,7 +375,7 @@ def main():
             st.plotly_chart(fig_weather, use_container_width=True)
     
     # ========================================================================
-    # CHART 5: Temperature Impact (NOW WORKING - data fixed!)
+    # CHART 5: Temperature Impact
     # ========================================================================
     
     st.subheader("🌡️ Temperature Impact on Crop Prices")
